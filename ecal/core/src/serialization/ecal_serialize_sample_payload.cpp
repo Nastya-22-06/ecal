@@ -41,6 +41,16 @@
 
 namespace
 {
+  namespace qos_tags
+  {
+    // Пользовательские protobuf-теги для QoS в Content.
+    // Выбраны вне диапазона текущих полей Content, чтобы не конфликтовать.
+    constexpr protozero::pbf_tag_type content_qos_reliability  = 1001;
+    constexpr protozero::pbf_tag_type content_qos_priority     = 1002;
+    constexpr protozero::pbf_tag_type content_qos_deadline_ms  = 1003;
+    constexpr protozero::pbf_tag_type content_qos_durability   = 1004;
+  }
+
   template<typename Writer>
   void SerializePayload(Writer& writer, const ::eCAL::Payload::Payload& payload)
   {
@@ -86,6 +96,11 @@ namespace
       content_writer.add_int32(+eCAL::pb::Content::optional_int32_size, sample.content.size);
       SerializePayload(content_writer, sample.content.payload);
       content_writer.add_int64(+eCAL::pb::Content::optional_int64_hash,  sample.content.hash);
+      // QoS метаданные сообщения
+      content_writer.add_uint32(qos_tags::content_qos_reliability, static_cast<uint32_t>(sample.content.qos.reliability));
+      content_writer.add_uint32(qos_tags::content_qos_priority,    static_cast<uint32_t>(sample.content.qos.priority));
+      content_writer.add_uint32(qos_tags::content_qos_deadline_ms, sample.content.qos.deadline_ms);
+      content_writer.add_uint32(qos_tags::content_qos_durability,  static_cast<uint32_t>(sample.content.qos.durability));
     }
     writer.add_bytes(+eCAL::pb::Sample::optional_bytes_padding, sample.padding.data(), sample.padding.size());
   }
@@ -145,6 +160,18 @@ namespace
         break;
       case +eCAL::pb::Content::optional_int64_hash:
         content.hash = reader.get_int64();
+        break;
+      case qos_tags::content_qos_reliability:
+        content.qos.reliability = static_cast<eCAL::QoS::Reliability>(reader.get_uint32());
+        break;
+      case qos_tags::content_qos_priority:
+        content.qos.priority = static_cast<eCAL::QoS::Priority>(reader.get_uint32());
+        break;
+      case qos_tags::content_qos_deadline_ms:
+        content.qos.deadline_ms = reader.get_uint32();
+        break;
+      case qos_tags::content_qos_durability:
+        content.qos.durability = static_cast<eCAL::QoS::Durability>(reader.get_uint32());
         break;
       default:
         reader.skip();

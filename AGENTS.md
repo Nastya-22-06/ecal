@@ -124,3 +124,29 @@ For broad core changes, use the Ubuntu CI recipe as default local reference. For
 ---
 
 If in doubt, mirror the closest existing implementation pattern in the same subdirectory and validate with the corresponding CI-equivalent build/test path.
+
+
+---
+
+## Лабораторная работа: Реализация QoS для eCAL
+
+### Локальное окружение
+- ОС: Windows 11
+- Компилятор: MSVC 19.51+ (Visual Studio 2026 Insiders)
+- Сборка: CMake 3.31.12 + Ninja
+- GUI: Qt 6.8.3 (msvc2022_64)
+- Путь к проекту: `D:\ecal_project`
+
+### Команды сборки (локально)
+```cmd
+cd D:\ecal_project\_build\complete
+cmake ../.. -G Ninja ^
+  -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64" ^
+  -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=cmake/submodule_dependencies.cmake ^
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build . --parallel --config Release
+
+
+
+
+

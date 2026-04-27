@@ -249,12 +249,48 @@ add PROGRESS.md with full spec and current progress
 - ✅ Обратная совместимость: старые версии игнорируют новые qos-поля
 
 ---
-### 🔄 [2026-04-28] Этап 3: Мониторинг и визуализация — 🔄 В РАБОТЕ
+### 🔄 [2026-04-28] Этап 3: Мониторинг и визуализация — 🔄 ЧАСТИЧНО ЗАВЕРШЁН
 
-**Текущая задача:**
-- [ ] `app/mon/mon_gui/src/widgets/models/topic_tree_model.*` — добавить колонку "QoS Priority"
-- [ ] Реализовать цветовую индикацию: 🔴 CRITICAL, 🟠 HIGH, 🟢 NORMAL, ⚪ LOW/BACKGROUND
-- [ ] Добавить счётчик нарушений deadline в детали топика
+**✅ ШАГ 1: Модель данных + цветовая индикация — ЗАВЕРШЁН**
+
+**Выполнено:**
+- [x] `app/mon/mon_gui/src/widgets/models/topic_tree_model.h` — добавлена колонка `QOS_PRIORITY`
+- [x] `app/mon/mon_gui/src/widgets/models/topic_tree_item.h` — добавлены поля:
+  * `current_priority_` (eCAL::QoS::Priority)
+  * `deadline_violations_count_` (uint64_t)
+  * `reliability_mode_` (eCAL::QoS::Reliability)
+  * `qos_data_available_` (bool, fallback при отсутствии данных)
+- [x] `app/mon/mon_gui/src/widgets/models/topic_tree_item.cpp` — реализовано:
+  * Отображение текста приоритета ("CRITICAL", "HIGH", etc.)
+  * Цветовая индикация через `Qt::ForegroundRole`:
+    - 🔴 CRITICAL (100) → `QColor(255, 0, 0)`
+    - 🟠 HIGH (75) → `QColor(255, 165, 0)`
+    - 🟢 NORMAL (50) → `QColor(0, 200, 0)`
+    - ⚪ LOW/BACKGROUND → `QColor(128, 128, 128)`
+  * Fallback "N/A" при `!qos_data_available_`
+
+
+**Важные решения:**
+- ✅ Цвета соответствуют требованиям ТЗ
+- ✅ Безопасный fallback "N/A" при отсутствии данных мониторинга
+- ✅ Комментарии на русском для удобства защиты
+- ✅ Поля добавлены в конец структур (если применимо)
+
+---
+
+**⏳ ШАГ 2: Обновление данных из мониторинга — ОЖИДАЕТ**
+- [ ] Найти место обработки `eCAL::Monitoring::STopic`
+- [ ] Извлечь QoS-метрики (или использовать дефолты, если полей ещё нет в `STopic`)
+- [ ] Обновить `TopicTreeItem` при получении новых данных
+
+**⏳ ШАГ 3: Детали топика (панель свойств) — ОЖИДАЕТ**
+- [ ] Отобразить `reliability_mode_` (BEST_EFFORT/RELIABLE)
+- [ ] Отобразить `deadline_violations_count_`
+
+**⏳ ШАГ 4: График распределения по приоритетам — ОЖИДАЕТ**
+- [ ] Создать виджет с гистограммой/диаграммой приоритетов
+
+
 
 **Следующие задачи:**
 - [ ] Написать тесты на приоритетную доставку (порядок сообщений)

@@ -24,6 +24,7 @@
 #include <QFont>
 #include <QString>
 #include <QByteArray>
+#include <QColor>
 
 #include "item_data_roles.h"
 
@@ -81,6 +82,23 @@ QVariant TopicTreeItem::data(Columns column, Qt::ItemDataRole role) const
     else if (column == Columns::DIRECTION)
     {
       return topic_.direction.c_str();
+    }
+    else if (column == Columns::QOS_PRIORITY)
+    {
+      if (!qos_data_available_)
+      {
+        return QString("N/A");
+      }
+
+      switch (current_priority_)
+      {
+      case eCAL::QoS::Priority::CRITICAL:   return QString("CRITICAL");
+      case eCAL::QoS::Priority::HIGH:       return QString("HIGH");
+      case eCAL::QoS::Priority::NORMAL:     return QString("NORMAL");
+      case eCAL::QoS::Priority::LOW:        return QString("LOW");
+      case eCAL::QoS::Priority::BACKGROUND: return QString("BACKGROUND");
+      default:                              return QString("N/A");
+      }
     }
     else if (column == Columns::TENCODING)
     {
@@ -144,6 +162,7 @@ QVariant TopicTreeItem::data(Columns column, Qt::ItemDataRole role) const
       || (column == Columns::UNIT_NAME)
       || (column == Columns::TOPIC_NAME)
       || (column == Columns::DIRECTION)
+      || (column == Columns::QOS_PRIORITY)
       || (column == Columns::TENCODING)
       || (column == Columns::TTYPE))
     {
@@ -274,6 +293,27 @@ QVariant TopicTreeItem::data(Columns column, Qt::ItemDataRole role) const
     else
     {
       return Qt::AlignmentFlag::AlignLeft;
+    }
+  }
+  else if (role == Qt::ItemDataRole::ForegroundRole)
+  {
+    // Цвет QoS отображаем только если есть данные и только для колонки приоритета.
+    if ((column == Columns::QOS_PRIORITY) && qos_data_available_)
+    {
+      switch (current_priority_)
+      {
+      case eCAL::QoS::Priority::CRITICAL:
+        return QColor(255, 0, 0);     // красный
+      case eCAL::QoS::Priority::HIGH:
+        return QColor(255, 165, 0);   // оранжевый
+      case eCAL::QoS::Priority::NORMAL:
+        return QColor(0, 200, 0);     // зеленый
+      case eCAL::QoS::Priority::LOW:
+      case eCAL::QoS::Priority::BACKGROUND:
+        return QColor(128, 128, 128); // серый
+      default:
+        break;
+      }
     }
   }
 

@@ -23,6 +23,7 @@
 #include "CustomQt/QAbstractTreeItem.h"
 #include <QFont>
 #include <ecal/types/monitoring.h>
+#include <ecal/qos.h>
 
 class TopicTreeItem :
   public QAbstractTreeItem
@@ -40,6 +41,7 @@ public:
     TOPIC_ID,
     TOPIC_NAME,
     DIRECTION,
+    QOS_PRIORITY,
     TENCODING,
     TTYPE,
     TDESC,
@@ -74,6 +76,10 @@ public:
 
 private:
   eCAL::Monitoring::STopic topic_;
+  eCAL::QoS::Priority current_priority_                = eCAL::QoS::Priority::NORMAL;
+  uint64_t            deadline_violations_count_       = 0;
+  eCAL::QoS::Reliability reliability_mode_             = eCAL::QoS::Reliability::BEST_EFFORT;
+  bool                qos_data_available_              = false; //!< Если false, QoS пока не пришел из мониторинга.
   QFont itemfont;
   static QString toFrequencyString(long long freq);
 };

@@ -25,6 +25,7 @@
 #pragma once
 
 #include <ecal/config/transport_layer.h>
+#include <ecal/qos.h>
 
 #include <cstddef>
 
@@ -71,6 +72,8 @@ namespace eCAL
       Layer::Configuration layer;
 
       bool drop_out_of_order_messages { true }; //!< Enable dropping of payload messages that arrive out of order
+
+      QoS::Policies qos;                        //!< Политики QoS для подписчика (включая min_priority и deadline_callback)
     };
   }
 }

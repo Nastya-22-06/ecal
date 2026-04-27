@@ -108,6 +108,7 @@ namespace eCAL
     : m_publisher_id(eCAL::Util::GenerateUniqueEntityId())
     , m_topic_info(topic_info_)
     , m_attributes(attr_)
+    , m_config_qos(attr_.qos)
     , m_frequency_calculator(3.0f)
     , m_created(false)
     , m_global_context(std::move(global_context_))
@@ -150,7 +151,7 @@ namespace eCAL
     Unregister();
   }
 
-  bool CPublisherImpl::Write(CPayloadWriter& payload_, long long time_, long long filter_id_)
+  bool CPublisherImpl::Write(CPayloadWriter& payload_, long long time_, long long filter_id_, const eCAL::QoS::Policies* msg_qos_ /* = nullptr */)
   {
     // get payload buffer size (one time, to avoid multiple computations)
     const size_t payload_buf_size(payload_.GetSize());
@@ -204,6 +205,10 @@ namespace eCAL
         wattr.time = time_;
         wattr.zero_copy = m_attributes.shm.zero_copy_mode;
         wattr.acknowledge_timeout_ms = m_attributes.shm.acknowledge_timeout_ms;
+        // Для каждого сообщения выбираем QoS:
+        // 1) QoS сообщения (если явно передан), иначе
+        // 2) QoS из конфигурации publisher.
+        wattr.qos = (msg_qos_ != nullptr) ? *msg_qos_ : m_config_qos;
 
         // prepare send
         if (m_writer_shm->PrepareWrite(wattr))
@@ -266,6 +271,8 @@ namespace eCAL
         wattr.hash = snd_hash;
         wattr.time = time_;
         wattr.loopback = m_attributes.loopback;
+        // Передаём QoS в транспортный атрибут writer.
+        wattr.qos = (msg_qos_ != nullptr) ? *msg_qos_ : m_config_qos;
 
         // prepare send
         if (m_writer_udp->PrepareWrite(wattr))
@@ -314,6 +321,8 @@ namespace eCAL
         wattr.clock = m_clock;
         wattr.hash = snd_hash;
         wattr.time = time_;
+        // QoS должен попадать в общий атрибут независимо от транспорта.
+        wattr.qos = (msg_qos_ != nullptr) ? *msg_qos_ : m_config_qos;
 
         // write to tcp layer
         tcp_sent = m_writer_tcp->Write(m_payload_buffer.data(), wattr);

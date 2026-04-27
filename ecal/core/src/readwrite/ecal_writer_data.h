@@ -24,6 +24,7 @@
 #pragma once
 
 #include <cstddef>
+#include <ecal/qos.h>
 
 namespace eCAL
 {
@@ -37,5 +38,6 @@ namespace eCAL
     bool         loopback               = false;
     bool         zero_copy              = false;
     long long    acknowledge_timeout_ms = 0;
+    eCAL::QoS::Policies qos{};          //!< Политики QoS для этого сообщения
   };
 }

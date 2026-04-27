@@ -20,6 +20,7 @@
 #pragma once
 
 #include "readwrite/config/attributes/reader_attributes.h"
+#include "ecal/config/configuration.h"
 #include "ecal/config/subscriber.h"
 #include "ecal/config/transport_layer.h"
 #include "ecal/config/registration.h"

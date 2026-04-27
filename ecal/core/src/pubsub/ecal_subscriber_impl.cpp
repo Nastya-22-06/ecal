@@ -56,6 +56,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <iostream>
 #include <iterator>
 #include <limits>
@@ -80,6 +81,7 @@ namespace eCAL
                  m_frequency_calculator(3.0f),
                  m_created(false),
                  m_attributes(attr_),
+                 m_config_qos(attr_.qos),
                  m_global_context(std::move(global_context_))
   {
 #ifndef NDEBUG
@@ -233,6 +235,20 @@ namespace eCAL
     return true;
   }
 
+  bool CSubscriberImpl::SetMinPriority(eCAL::QoS::Priority min_priority_)
+  {
+    if (!m_created) return false;
+    m_config_qos.min_priority = min_priority_;
+    return true;
+  }
+
+  bool CSubscriberImpl::SetDeadlineCallback(const std::function<void(const std::string&)>& callback_)
+  {
+    if (!m_created) return false;
+    m_config_qos.deadline_callback = callback_;
+    return true;
+  }
+
   void CSubscriberImpl::SetFilterIDs(const std::set<long long>& filter_ids_)
   {
 #ifndef NDEBUG
@@ -371,7 +387,7 @@ namespace eCAL
 #endif
   }
 
-  size_t CSubscriberImpl::ApplySample(const Payload::TopicInfo& topic_info_, const char* payload_, size_t size_, long long id_, long long clock_, long long time_, size_t /*hash_*/, eTLayerType layer_)
+  size_t CSubscriberImpl::ApplySample(const Payload::TopicInfo& topic_info_, const char* payload_, size_t size_, long long id_, long long clock_, long long time_, size_t /*hash_*/, const eCAL::QoS::Policies& msg_qos_, eTLayerType layer_)
   {
     // ensure thread safety
     const std::lock_guard<std::mutex> lock(m_receive_callback_mutex);
@@ -396,6 +412,31 @@ namespace eCAL
     if (!ShouldApplySampleBasedOnId(id_))
     {
       return 0;
+    }
+
+    // Если в сообщении deadline не задан, используем deadline из конфигурации подписчика.
+    eCAL::QoS::Policies effective_qos = msg_qos_;
+    if (effective_qos.deadline_ms == 0U)
+    {
+      effective_qos.deadline_ms = m_config_qos.deadline_ms;
+    }
+
+    // Фильтрация по минимальному приоритету подписчика.
+    if (static_cast<std::uint32_t>(effective_qos.priority) < static_cast<std::uint32_t>(m_config_qos.min_priority))
+    {
+      return 0;
+    }
+
+    // Проверка deadline: если задержка доставки превышает deadline, вызываем callback.
+    if ((effective_qos.deadline_ms > 0U) && (time_ > 0))
+    {
+      const long long now_us = eCAL::Time::GetMicroSeconds();
+      const long long latency_us = now_us - time_;
+      const long long deadline_us = static_cast<long long>(effective_qos.deadline_ms) * 1000LL;
+      if ((latency_us > deadline_us) && static_cast<bool>(m_config_qos.deadline_callback))
+      {
+        m_config_qos.deadline_callback(m_attributes.topic_name);
+      }
     }
 
     // store receive layer

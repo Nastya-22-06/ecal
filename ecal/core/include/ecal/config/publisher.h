@@ -90,6 +90,7 @@
 
 #include <ecal/types/custom_data_types.h>
 #include <ecal/config/transport_layer.h>
+#include <ecal/qos.h>
 
 #include <cstddef>
 #include <vector>
@@ -146,6 +147,8 @@ namespace eCAL
       using LayerPriorityVector = std::vector<TransportLayer::eType>;
       LayerPriorityVector  layer_priority_local    { TransportLayer::eType::shm,    TransportLayer::eType::udp_mc, TransportLayer::eType::tcp };
       LayerPriorityVector  layer_priority_remote   { TransportLayer::eType::udp_mc, TransportLayer::eType::tcp };
+
+      QoS::Policies        qos;                          //!< Политики QoS для публикации (по умолчанию: BEST_EFFORT / NORMAL / deadline=0 / VOLATILE)
     };
   }
 }

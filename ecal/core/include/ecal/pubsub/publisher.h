@@ -31,9 +31,11 @@
 
 #include <ecal/pubsub/types.h>
 #include <ecal/pubsub/payload_writer.h>
+#include <ecal/qos.h>
 
 #include <ecal/config.h>
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -110,6 +112,18 @@ namespace eCAL
     **/
     ECAL_API_EXPORTED_MEMBER
       bool Send(const void* buf_, size_t len_, long long time_ = DEFAULT_TIME_ARGUMENT);
+
+    /**
+     * @brief Отправить сообщение всем подписчикам с переопределением QoS для конкретного сообщения.
+     *
+     * @param buf_   Указатель на буфер с данными.
+     * @param size_  Размер буфера в байтах.
+     * @param qos_   Политики QoS для данного сообщения (переопределяют QoS из конфигурации publisher).
+     *
+     * @return True в случае успешной отправки, иначе false.
+    **/
+    ECAL_API_EXPORTED_MEMBER
+      bool Send(const void* buf_, std::size_t size_, const QoS::Policies& qos_);
 
     /**
      * @brief Send a message to all subscribers.

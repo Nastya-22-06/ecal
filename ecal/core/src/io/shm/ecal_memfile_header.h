@@ -24,6 +24,7 @@
 #pragma once
 
 #include <cstdint>
+#include <ecal/qos.h>
 
 namespace eCAL
 {
@@ -44,6 +45,11 @@ namespace eCAL
     optflags   options = { 0, 0 };
     // ----- > 5.11 ----
     int64_t    ack_timout_ms = 0;
+    // ----- > 5.16 ----
+    uint32_t   qos_reliability = static_cast<uint32_t>(eCAL::QoS::Reliability::BEST_EFFORT);
+    uint32_t   qos_priority    = static_cast<uint32_t>(eCAL::QoS::Priority::NORMAL);
+    uint32_t   qos_deadline_ms = 0U;
+    uint32_t   qos_durability  = static_cast<uint32_t>(eCAL::QoS::Durability::VOLATILE);
   };
 }
  

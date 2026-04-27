@@ -132,7 +132,9 @@ namespace eCAL
           ecal_header_content.id,
           ecal_header_content.clock,
           ecal_header_content.time,
-          ecal_header_content.hash,
+          static_cast<size_t>(ecal_header_content.hash),
+          // Передаем QoS, извлеченный из TCP-заголовка (protobuf content).
+          ecal_header_content.qos,
           tl_ecal_tcp);
       }
     }

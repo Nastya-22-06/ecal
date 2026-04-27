@@ -108,6 +108,7 @@ namespace eCAL
 
   bool CUDPReaderLayer::ApplySample(const char* serialized_sample_data_, size_t serialized_sample_size_)
   {
+    // QoS извлекается из protobuf-пакета внутри CSubGate::ApplySample(serialized...).
     if (m_subgate) return m_subgate->ApplySample(serialized_sample_data_, serialized_sample_size_, tl_ecal_udp);
     return false;
   }

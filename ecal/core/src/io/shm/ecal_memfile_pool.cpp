@@ -227,13 +227,23 @@ namespace eCAL
                     // calculate user payload address
                     data_buf = static_cast<const char*>(buf) + mfile_hdr.hdr_size;
                     // call user callback function
-                    m_data_callback(data_buf, mfile_hdr.data_size, (long long)mfile_hdr.id, (long long)mfile_hdr.clock, (long long)mfile_hdr.time, (size_t)mfile_hdr.hash);
+                    eCAL::QoS::Policies msg_qos;
+                    msg_qos.reliability = static_cast<eCAL::QoS::Reliability>(mfile_hdr.qos_reliability);
+                    msg_qos.priority    = static_cast<eCAL::QoS::Priority>(mfile_hdr.qos_priority);
+                    msg_qos.deadline_ms = mfile_hdr.qos_deadline_ms;
+                    msg_qos.durability  = static_cast<eCAL::QoS::Durability>(mfile_hdr.qos_durability);
+                    m_data_callback(data_buf, mfile_hdr.data_size, (long long)mfile_hdr.id, (long long)mfile_hdr.clock, (long long)mfile_hdr.time, (size_t)mfile_hdr.hash, msg_qos);
                   }
                 }
                 else
                 {
                   // call user callback function
-                  m_data_callback(data_buf, mfile_hdr.data_size, (long long)mfile_hdr.id, (long long)mfile_hdr.clock, (long long)mfile_hdr.time, (size_t)mfile_hdr.hash);
+                  eCAL::QoS::Policies msg_qos;
+                  msg_qos.reliability = static_cast<eCAL::QoS::Reliability>(mfile_hdr.qos_reliability);
+                  msg_qos.priority    = static_cast<eCAL::QoS::Priority>(mfile_hdr.qos_priority);
+                  msg_qos.deadline_ms = mfile_hdr.qos_deadline_ms;
+                  msg_qos.durability  = static_cast<eCAL::QoS::Durability>(mfile_hdr.qos_durability);
+                  m_data_callback(data_buf, mfile_hdr.data_size, (long long)mfile_hdr.id, (long long)mfile_hdr.clock, (long long)mfile_hdr.time, (size_t)mfile_hdr.hash, msg_qos);
                 }
               }
             }
@@ -268,7 +278,15 @@ namespace eCAL
             if (post_process_buffer)
             {
               // add sample to data reader (and call user callback function)
-              if (m_data_callback) m_data_callback(receive_buffer.data(), receive_buffer.size(), (long long)mfile_hdr.id, (long long)mfile_hdr.clock, (long long)mfile_hdr.time, (size_t)mfile_hdr.hash);
+              if (m_data_callback)
+              {
+                eCAL::QoS::Policies msg_qos;
+                msg_qos.reliability = static_cast<eCAL::QoS::Reliability>(mfile_hdr.qos_reliability);
+                msg_qos.priority    = static_cast<eCAL::QoS::Priority>(mfile_hdr.qos_priority);
+                msg_qos.deadline_ms = mfile_hdr.qos_deadline_ms;
+                msg_qos.durability  = static_cast<eCAL::QoS::Durability>(mfile_hdr.qos_durability);
+                m_data_callback(receive_buffer.data(), receive_buffer.size(), (long long)mfile_hdr.id, (long long)mfile_hdr.clock, (long long)mfile_hdr.time, (size_t)mfile_hdr.hash, msg_qos);
+              }
             }
 
             // send acknowledge event

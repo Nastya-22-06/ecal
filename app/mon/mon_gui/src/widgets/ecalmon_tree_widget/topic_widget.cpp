@@ -160,6 +160,7 @@ TopicWidget::TopicWidget(QWidget *parent)
   {
     (int)TopicTreeModel::Columns::TOPIC_NAME,
     (int)TopicTreeModel::Columns::DIRECTION,
+    (int)TopicTreeModel::Columns::QOS_PRIORITY,
     (int)TopicTreeModel::Columns::UNIT_NAME,
     (int)TopicTreeModel::Columns::HOST_NAME,
     (int)TopicTreeModel::Columns::PROCESS_ID,
@@ -274,6 +275,7 @@ void TopicWidget::autoSizeColumns()
     (int)TopicTreeModel::Columns::GROUP,
     (int)TopicTreeModel::Columns::TOPIC_NAME,
     (int)TopicTreeModel::Columns::DIRECTION,
+    (int)TopicTreeModel::Columns::QOS_PRIORITY,
     (int)TopicTreeModel::Columns::UNIT_NAME,
     (int)TopicTreeModel::Columns::HOST_NAME,
     (int)TopicTreeModel::Columns::PROCESS_ID,

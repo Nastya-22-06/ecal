@@ -32,6 +32,36 @@
 
 #include <ecal/ecal.h>
 
+namespace
+{
+  struct SMonitoringQosData
+  {
+    eCAL::QoS::Priority     current_priority          = eCAL::QoS::Priority::NORMAL;
+    uint64_t                deadline_violations_count = 0;
+    eCAL::QoS::Reliability  reliability_mode          = eCAL::QoS::Reliability::BEST_EFFORT;
+    bool                    qos_data_available        = false;
+  };
+
+  SMonitoringQosData ExtractQosDataFromMonitoringTopic(const eCAL::Monitoring::STopic& topic)
+  {
+    SMonitoringQosData qos_data;
+
+    // Если qos_priority == 0, считаем, что QoS пока не пришел из мониторинга.
+    // В этом случае оставляем безопасные дефолты и показываем "N/A" в GUI.
+    qos_data.qos_data_available = (topic.qos_priority != 0);
+    if (!qos_data.qos_data_available)
+    {
+      return qos_data;
+    }
+
+    qos_data.current_priority          = static_cast<eCAL::QoS::Priority>(topic.qos_priority);
+    qos_data.deadline_violations_count = topic.qos_deadline_violations;
+    qos_data.reliability_mode          = static_cast<eCAL::QoS::Reliability>(topic.qos_reliability);
+
+    return qos_data;
+  }
+}
+
 TopicTreeItem::TopicTreeItem(const eCAL::Monitoring::STopic& topic)
 {
   update(topic);
@@ -393,6 +423,12 @@ int TopicTreeItem::type() const
 void TopicTreeItem::update(const eCAL::Monitoring::STopic& topic)
 {
   topic_ = topic;
+
+  const auto qos_data = ExtractQosDataFromMonitoringTopic(topic);
+  current_priority_ = qos_data.current_priority;
+  deadline_violations_count_ = qos_data.deadline_violations_count;
+  reliability_mode_ = qos_data.reliability_mode;
+  qos_data_available_ = qos_data.qos_data_available;
 }
 
 eCAL::Monitoring::STopic TopicTreeItem::getTopic()

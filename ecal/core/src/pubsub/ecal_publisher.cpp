@@ -97,6 +97,25 @@ namespace eCAL
     return Send(payload, time_);
   }
 
+  void CPublisher::SetQoS(const QoS::Policies& qos_)
+  {
+    auto publisher_impl = m_publisher_impl.lock();
+    if (!publisher_impl) return;
+
+    static_cast<void>(publisher_impl->SetQoS(qos_));
+  }
+
+  size_t CPublisher::Send(const void* msg_, std::size_t len_, const QoS::Policies& qos_)
+  {
+    auto publisher_impl = m_publisher_impl.lock();
+    if (!publisher_impl) return 0;
+
+    CBufferPayloadWriter payload{ msg_, len_ };
+    const long long write_time = eCAL::Time::GetMicroSeconds();
+    const bool written = publisher_impl->Write(payload, write_time, 0, &qos_);
+    return written ? len_ : 0;
+  }
+
   bool CPublisher::Send(CPayloadWriter& payload_, long long time_)
   {
     auto publisher_impl = m_publisher_impl.lock();

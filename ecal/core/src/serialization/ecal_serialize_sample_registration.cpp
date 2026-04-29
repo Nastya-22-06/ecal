@@ -45,6 +45,13 @@
 
 namespace
 {
+  namespace qos_tags
+  {
+    // Пользовательские protobuf-теги для QoS внутри Registration::Topic.
+    // Выбраны вне диапазона текущих полей Topic, чтобы не конфликтовать со старым протоколом.
+    constexpr protozero::pbf_tag_type topic_qos_priority    = 2001;
+    constexpr protozero::pbf_tag_type topic_qos_reliability = 2002;
+  }
 
   //using namespace eCAL::protozero;
   template <typename Writer>
@@ -285,6 +292,12 @@ namespace
         Writer latency_writer{ topic_writer, +eCAL::pb::Topic::optional_message_data_latency_us };
         SerializeTopicStatistics(latency_writer, sample.topic.latency_us);
       }
+
+      // QoS (опционально, для обратной совместимости)
+      if (sample.topic.qos_priority != 0)
+        topic_writer.add_uint32(qos_tags::topic_qos_priority, sample.topic.qos_priority);
+      if (sample.topic.qos_reliability != 0)
+        topic_writer.add_uint32(qos_tags::topic_qos_reliability, sample.topic.qos_reliability);
     }
   }
 
@@ -356,6 +369,12 @@ namespace
         break;
       case +eCAL::pb::Topic::optional_message_data_latency_us:
         AssignMessage(reader, sample.topic.latency_us, DeserializeTopicStatistics);
+        break;
+      case qos_tags::topic_qos_priority:
+        sample.topic.qos_priority = reader.get_uint32();
+        break;
+      case qos_tags::topic_qos_reliability:
+        sample.topic.qos_reliability = reader.get_uint32();
         break;
       default:
         reader.skip();

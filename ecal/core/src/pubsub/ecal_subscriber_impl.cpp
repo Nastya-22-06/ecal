@@ -305,6 +305,15 @@ namespace eCAL
     // handle these events outside the lock
     if (is_new_connection)
     {
+      // QoS Durability: TRANSIENT_LOCAL (LVC replay).
+      // Подписчик не обязан знать durability publisher'а заранее, поэтому при каждом новом
+      // подключении разрешаем один out-of-order sample. Флаг будет сброшен при первом
+      // принятом "старом" сообщении, так что бесконечных повторов не будет.
+      {
+        const std::lock_guard<std::mutex> tl_lock(m_transient_local_mutex);
+        m_waiting_for_transient_local_replay.insert(publication_info_);
+      }
+
       // fire connect event
       FireConnectEvent(publication_info_, data_type_info_);
     }
@@ -401,11 +410,44 @@ namespace eCAL
 
     auto publication_info = PublicationInfoFromTopicInfo(topic_info_);
 
-    // We do not want to apply duplicate / old samples
-    if (!ShouldApplySampleBasedOnClock(publication_info, clock_))
+    // We do not want to apply duplicate samples
+    if (m_publisher_message_counter_map.HasCounter(publication_info, clock_) != CounterCacheMapT::CounterInCache::False)
     {
-      // not clear why we are returning the size_ if we are not applying the sample, but why not...
       return size_;
+    }
+
+    // The sample counter is strictly monotonically increasing. If not so, we received an old message.
+    // QoS Durability (TRANSIENT_LOCAL): допускаем ровно один "старый" sample (LVC replay) сразу после подключения.
+    // Важно: разрешение НЕ зависит от msg_qos_.durability, т.к. durability может быть свойством publisher'а,
+    // а в реплей-сэмпле флаг может отсутствовать / потеряться при маршаллизации.
+    if (!m_publisher_message_counter_map.IsMonotonic(publication_info, clock_))
+    {
+      bool allow_out_of_order_transient_local = false;
+      {
+        const std::lock_guard<std::mutex> tl_lock(m_transient_local_mutex);
+        allow_out_of_order_transient_local = (m_waiting_for_transient_local_replay.find(publication_info) != m_waiting_for_transient_local_replay.end());
+        if (allow_out_of_order_transient_local)
+        {
+          m_waiting_for_transient_local_replay.erase(publication_info);
+        }
+      }
+
+      if (!allow_out_of_order_transient_local)
+      {
+#ifndef NDEBUG
+        std::string msg = "Subscriber: \'";
+        msg += m_attributes.topic_name;
+        msg += "\'";
+        msg += " received a message in the wrong order";
+        eCAL::Logging::Log(Logging::log_level_warning, msg);
+#endif
+
+        // @TODO: We should not have a global config call here. This should be an attribute of the subscriber!
+        if (Config::GetDropOutOfOrderMessages())
+        {
+          return size_;
+        }
+      }
     }
 
     // We might not want to apply samples sent with a given ID (deprecated!)

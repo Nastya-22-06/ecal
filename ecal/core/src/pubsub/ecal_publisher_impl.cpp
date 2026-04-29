@@ -49,8 +49,10 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <cstdint>
 #include <limits>
 #include <mutex>
+#include <queue>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -125,6 +127,10 @@ namespace eCAL
 
     // mark as created
     m_created = true;
+
+    // Запускаем асинхронный диспетчер исходящей приоритетной очереди.
+    m_stop_send_dispatcher = false;
+    m_send_dispatch_thread = std::thread(&CPublisherImpl::DispatchQueuedSamples, this);
   }
 
   CPublisherImpl::~CPublisherImpl()
@@ -134,6 +140,14 @@ namespace eCAL
 #endif
 
     if (!m_created) return;
+
+    // Останавливаем поток диспетчера и дожидаемся, пока он завершит отправку уже взятых элементов.
+    m_stop_send_dispatcher = true;
+    m_send_queue_cv.notify_all();
+    if (m_send_dispatch_thread.joinable())
+    {
+      m_send_dispatch_thread.join();
+    }
 
     // stop all transport layer
     StopAllLayer();
@@ -156,31 +170,135 @@ namespace eCAL
     // get payload buffer size (one time, to avoid multiple computations)
     const size_t payload_buf_size(payload_.GetSize());
 
-    // are we allowed to perform zero copy writing?
-    bool allow_zero_copy(false);
-#if ECAL_CORE_TRANSPORT_SHM
-    allow_zero_copy = m_attributes.shm.zero_copy_mode; // zero copy mode activated by user
-#endif
-#if ECAL_CORE_TRANSPORT_UDP
-    // udp is active -> no zero copy
-    allow_zero_copy &= !m_writer_udp;
-#endif
-#if ECAL_CORE_TRANSPORT_TCP
-    // tcp is active -> no zero copy
-    allow_zero_copy &= !m_writer_tcp;
-#endif
-
-    // create a payload copy for all layer
-    if (!allow_zero_copy)
-    {
-      m_payload_buffer.resize(payload_buf_size);
-      payload_.WriteFull(m_payload_buffer.data(), m_payload_buffer.size());
-    }
-
-    // prepare counter and internal states
+    // Подготавливаем счетчики и идентификаторы один раз в вызывающем потоке.
     const size_t snd_hash = PrepareWrite(filter_id_, payload_buf_size);
 
-    // did we write anything
+    // Выбираем QoS: сначала per-message, затем QoS из конфигурации publisher.
+    const eCAL::QoS::Policies effective_qos = (msg_qos_ != nullptr) ? *msg_qos_ : m_config_qos;
+    std::cout << "[PUB DEBUG] Write(): effective_qos.durability="
+              << static_cast<int>(effective_qos.durability)
+              << " (expected TRANSIENT_LOCAL="
+              << static_cast<int>(eCAL::QoS::Durability::TRANSIENT_LOCAL) << ")"
+              << std::endl;
+
+    SQueuedSample queued_sample;
+    queued_sample.id = m_id;
+    queued_sample.clock = m_clock;
+    queued_sample.hash = snd_hash;
+    queued_sample.time = time_;
+    queued_sample.qos = effective_qos;
+    queued_sample.normalized_priority = NormalizePriority(queued_sample.qos);
+    queued_sample.sequence = m_send_sequence.fetch_add(1, std::memory_order_relaxed);
+
+    // Асинхронная очередь хранит собственную копию payload.
+    queued_sample.payload.resize(payload_buf_size);
+    if (payload_buf_size > 0)
+    {
+      payload_.WriteFull(queued_sample.payload.data(), queued_sample.payload.size());
+    }
+
+    // QoS Durability: TRANSIENT_LOCAL (Last-Value Cache).
+    // Если включено, сохраняем последнее сообщение (payload + атрибуты) для поздних подписчиков.
+    // Кэш обновляется синхронно ДО передачи sample в асинхронную очередь.
+    if (effective_qos.durability == eCAL::QoS::Durability::TRANSIENT_LOCAL)
+    {
+      const std::lock_guard<std::mutex> lock(m_last_value_cache_mutex);
+      m_last_value_cache = queued_sample; // копируем только в этом режиме
+      std::cout << "[PUB DEBUG] Cached sample for LVC: clock=" << queued_sample.clock << std::endl;
+    }
+
+    std::cout << "[PUB DEBUG] Enqueue sample for send: clock=" << queued_sample.clock << std::endl;
+    return EnqueueSample(std::move(queued_sample));
+  }
+
+  bool CPublisherImpl::EnqueueSample(SQueuedSample&& sample_)
+  {
+    std::unique_lock<std::mutex> queue_lock(m_send_queue_mutex);
+
+    // Политика перегрузки:
+    // - при заполнении очереди LOW/BACKGROUND отбрасываем сразу;
+    // - для HIGH/CRITICAL/NORMAL пытаемся вытеснить один LOW/BACKGROUND.
+    if (m_send_queue.size() >= SEND_QUEUE_MAX_SIZE)
+    {
+      if (sample_.normalized_priority <= static_cast<uint32_t>(eCAL::QoS::Priority::LOW))
+      {
+        return false;
+      }
+
+      if (!DropOneLowPrioritySampleUnsafe())
+      {
+        return false;
+      }
+    }
+
+    m_send_queue.emplace_back(std::move(sample_));
+    std::push_heap(m_send_queue.begin(), m_send_queue.end(), SQueuedSampleComparator{});
+    queue_lock.unlock();
+    m_send_queue_cv.notify_one();
+
+    return true;
+  }
+
+  bool CPublisherImpl::DropOneLowPrioritySampleUnsafe()
+  {
+    for (auto it = m_send_queue.begin(); it != m_send_queue.end(); ++it)
+    {
+      if (it->normalized_priority <= static_cast<uint32_t>(eCAL::QoS::Priority::LOW))
+      {
+        m_send_queue.erase(it);
+        std::make_heap(m_send_queue.begin(), m_send_queue.end(), SQueuedSampleComparator{});
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  void CPublisherImpl::DispatchQueuedSamples()
+  {
+    for (;;)
+    {
+      SQueuedSample sample_to_send;
+
+      {
+        std::unique_lock<std::mutex> queue_lock(m_send_queue_mutex);
+        m_send_queue_cv.wait(queue_lock, [this]()
+          {
+            return m_stop_send_dispatcher.load() || !m_send_queue.empty();
+          });
+
+        if (m_send_queue.empty())
+        {
+          if (m_stop_send_dispatcher.load())
+          {
+            break;
+          }
+          continue;
+        }
+
+        std::pop_heap(m_send_queue.begin(), m_send_queue.end(), SQueuedSampleComparator{});
+        sample_to_send = std::move(m_send_queue.back());
+        m_send_queue.pop_back();
+      }
+
+      static_cast<void>(SendQueuedSample(sample_to_send));
+    }
+  }
+
+  uint32_t CPublisherImpl::NormalizePriority(const eCAL::QoS::Policies& qos_)
+  {
+    const uint32_t raw_priority = static_cast<uint32_t>(qos_.priority);
+    if (raw_priority == 0U)
+    {
+      // Обратная совместимость: приоритет "не задан" трактуем как NORMAL.
+      return static_cast<uint32_t>(eCAL::QoS::Priority::NORMAL);
+    }
+
+    return raw_priority;
+  }
+
+  bool CPublisherImpl::SendQueuedSample(const SQueuedSample& sample_)
+  {
     bool written(false);
 
     ////////////////////////////////////////////////////////////////////////////
@@ -198,17 +316,14 @@ namespace eCAL
       {
         // fill writer data
         struct SWriterAttr wattr;
-        wattr.len = payload_buf_size;
-        wattr.id = m_id;
-        wattr.clock = m_clock;
-        wattr.hash = snd_hash;
-        wattr.time = time_;
+        wattr.len = sample_.payload.size();
+        wattr.id = sample_.id;
+        wattr.clock = sample_.clock;
+        wattr.hash = sample_.hash;
+        wattr.time = sample_.time;
         wattr.zero_copy = m_attributes.shm.zero_copy_mode;
         wattr.acknowledge_timeout_ms = m_attributes.shm.acknowledge_timeout_ms;
-        // Для каждого сообщения выбираем QoS:
-        // 1) QoS сообщения (если явно передан), иначе
-        // 2) QoS из конфигурации publisher.
-        wattr.qos = (msg_qos_ != nullptr) ? *msg_qos_ : m_config_qos;
+        wattr.qos = sample_.qos;
 
         // prepare send
         if (m_writer_shm->PrepareWrite(wattr))
@@ -218,20 +333,9 @@ namespace eCAL
           Process::SleepMS(5);
         }
 
-        // we are the only active layer, and we support zero copy -> we do a zero copy write via payload
-        if (allow_zero_copy)
-        {
-          // write to shm layer (write content into the opened memory file without additional copy)
-          shm_sent = m_writer_shm->Write(payload_, wattr);
-        }
-        // multiple layer are active -> we make a copy and use that one
-        else
-        {
-          // wrap the buffer into a payload object
-          CBufferPayloadWriter payload_buf(m_payload_buffer.data(), m_payload_buffer.size());
-          // write to shm layer (write content into the opened memory file without additional copy)
-          shm_sent = m_writer_shm->Write(payload_buf, wattr);
-        }
+        // В приоритетном асинхронном пути payload всегда уже скопирован в очередь.
+        CBufferPayloadWriter payload_buf(sample_.payload.data(), sample_.payload.size());
+        shm_sent = m_writer_shm->Write(payload_buf, wattr);
 
         m_layers.shm.active = true;
       }
@@ -265,14 +369,13 @@ namespace eCAL
       {
         // fill writer data
         struct SWriterAttr wattr;
-        wattr.len = payload_buf_size;
-        wattr.id = m_id;
-        wattr.clock = m_clock;
-        wattr.hash = snd_hash;
-        wattr.time = time_;
+        wattr.len = sample_.payload.size();
+        wattr.id = sample_.id;
+        wattr.clock = sample_.clock;
+        wattr.hash = sample_.hash;
+        wattr.time = sample_.time;
         wattr.loopback = m_attributes.loopback;
-        // Передаём QoS в транспортный атрибут writer.
-        wattr.qos = (msg_qos_ != nullptr) ? *msg_qos_ : m_config_qos;
+        wattr.qos = sample_.qos;
 
         // prepare send
         if (m_writer_udp->PrepareWrite(wattr))
@@ -283,7 +386,7 @@ namespace eCAL
         }
 
         // write to udp multicast layer
-        udp_sent = m_writer_udp->Write(m_payload_buffer.data(), wattr);
+        udp_sent = m_writer_udp->Write(sample_.payload.data(), wattr);
         m_layers.udp.active = true;
       }
       written |= udp_sent;
@@ -316,16 +419,15 @@ namespace eCAL
       {
         // fill writer data
         struct SWriterAttr wattr;
-        wattr.len = payload_buf_size;
-        wattr.id = m_id;
-        wattr.clock = m_clock;
-        wattr.hash = snd_hash;
-        wattr.time = time_;
-        // QoS должен попадать в общий атрибут независимо от транспорта.
-        wattr.qos = (msg_qos_ != nullptr) ? *msg_qos_ : m_config_qos;
+        wattr.len = sample_.payload.size();
+        wattr.id = sample_.id;
+        wattr.clock = sample_.clock;
+        wattr.hash = sample_.hash;
+        wattr.time = sample_.time;
+        wattr.qos = sample_.qos;
 
         // write to tcp layer
-        tcp_sent = m_writer_tcp->Write(m_payload_buffer.data(), wattr);
+        tcp_sent = m_writer_tcp->Write(sample_.payload.data(), wattr);
         m_layers.tcp.active = true;
       }
       written |= tcp_sent;
@@ -345,6 +447,13 @@ namespace eCAL
 
     // return success
     return written;
+  }
+
+  bool CPublisherImpl::SetQoS(const eCAL::QoS::Policies& qos_)
+  {
+    m_config_qos = qos_;
+    // TODO: Применить QoS к уже активным writer'ам без пересоздания transport layer.
+    return true;
   }
 
   bool CPublisherImpl::SetDataTypeInformation(const SDataTypeInformation& topic_info_)
@@ -483,6 +592,32 @@ namespace eCAL
     {
       // fire connect event
       FireConnectEvent(subscription_info_, data_type_info_);
+
+      // QoS Durability: TRANSIENT_LOCAL (Last-Value Cache).
+      // При появлении нового подписчика отправляем ему последнее сообщение "повторно".
+      // Важно: отправляем с тем же clock, что и оригинал — тогда уже подключённые подписчики
+      // отбросят sample как дубликат, а новый подпишется и получит его один раз.
+      if (m_config_qos.durability == eCAL::QoS::Durability::TRANSIENT_LOCAL)
+      {
+        std::optional<SQueuedSample> cached_sample;
+        {
+          const std::lock_guard<std::mutex> lock(m_last_value_cache_mutex);
+          cached_sample = m_last_value_cache;
+        }
+
+        if (cached_sample.has_value())
+        {
+          std::cout << "[PUB DEBUG] Sending LVC replay: clock=" << cached_sample->clock << "\n";
+          SQueuedSample replay_sample = *cached_sample;
+          replay_sample.sequence = m_send_sequence.fetch_add(1, std::memory_order_relaxed);
+          replay_sample.normalized_priority = NormalizePriority(replay_sample.qos);
+          static_cast<void>(EnqueueSample(std::move(replay_sample)));
+        }
+        else
+        {
+          std::cout << "[PUB DEBUG] LVC cache is EMPTY, nothing to replay\n";
+        }
+      }
     }
 
 #ifndef NDEBUG
@@ -645,6 +780,11 @@ namespace eCAL
     ecal_reg_sample_topic.data_id      = m_id;
     ecal_reg_sample_topic.data_clock       = m_clock;
     ecal_reg_sample_topic.data_frequency        = GetFrequency();
+
+    // QoS (для eCAL Monitor): передаем per-publisher значения через registration path.
+    // Это позволяет отличать несколько publisher'ов с разными qos.priority в одном процессе.
+    ecal_reg_sample_topic.qos_priority    = static_cast<uint32_t>(m_config_qos.priority);
+    ecal_reg_sample_topic.qos_reliability = static_cast<uint32_t>(m_config_qos.reliability);
 
     size_t loc_connections(0);
     size_t ext_connections(0);

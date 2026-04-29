@@ -257,6 +257,34 @@ namespace eCAL
       TopicInfo.data_latency_us.max       = data_latency_us.max;
       TopicInfo.data_latency_us.mean      = data_latency_us.mean;
       TopicInfo.data_latency_us.variance  = data_latency_us.variance;
+
+      // QoS:
+      // QoS:
+      // QoS передается в registration sample per-entity (publisher/subscriber).
+      // Для обратной совместимости со старыми sender'ами используем fallback на конфиг,
+      // если поле не заполнено (== 0).
+      const auto config = eCAL::GetConfiguration();
+
+      eCAL::QoS::Policies qos_policies{};
+      if (pubsub_type_ == publisher)
+      {
+        qos_policies = config.publisher.qos;
+      }
+      else if (pubsub_type_ == subscriber)
+      {
+        qos_policies = config.subscriber.qos;
+      }
+
+      const uint32_t reg_qos_priority    = sample_topic.qos_priority;
+      const uint32_t reg_qos_reliability = sample_topic.qos_reliability;
+
+      TopicInfo.qos_priority    = (reg_qos_priority != 0U)    ? reg_qos_priority    : static_cast<uint32_t>(qos_policies.priority);
+      TopicInfo.qos_reliability = (reg_qos_reliability != 0U) ? reg_qos_reliability : static_cast<uint32_t>(qos_policies.reliability);
+
+      // Счетчик нарушений deadline пока не передается через registration path.
+      // Оставляем 0 как безопасное значение до появления runtime-счетчика.
+      const uint64_t deadline_violations = 0ULL;
+      TopicInfo.qos_deadline_violations = deadline_violations;
     }
 
     return(true);

@@ -22,6 +22,7 @@
 **/
 
 #include <ecal/config.h>
+#include <ecal/log.h>
 #include <ecal/process.h>
 
 #include "serialization/ecal_serialize_sample_payload.h"
@@ -106,6 +107,7 @@ namespace eCAL
     proto_header_content.time  = attr_.time;
     proto_header_content.hash  = static_cast<int64_t>(attr_.hash);
     proto_header_content.size  = static_cast<int32_t>(attr_.len); // we use this size attribute for "header only"
+    proto_header_content.qos   = attr_.qos;
 
     // Compute size of "ECAL" pre-header
     constexpr size_t ecal_magic_size(4 * sizeof(char));
@@ -161,7 +163,27 @@ namespace eCAL
     send_vec.emplace_back(static_cast<const char*>(buf_), attr_.len);
 
     // send it
-    const bool success = m_publisher->send(send_vec);
+    // NOTE: Полноценный ACK требует bidirectional-канала в tcp_pubsub.
+    // Реализован retry по таймауту для RELIABLE, что повышает надёжность без изменения thirdparty.
+    const bool is_reliable = (attr_.qos.reliability == eCAL::QoS::Reliability::RELIABLE);
+    const int  max_attempts = is_reliable ? 3 : 1;
+    const long long retry_sleep_ms = (attr_.acknowledge_timeout_ms > 0) ? attr_.acknowledge_timeout_ms : 50;
+
+    bool success = false;
+    for (int attempt = 1; attempt <= max_attempts; ++attempt)
+    {
+      success = m_publisher->send(send_vec);
+      if (success)
+        break;
+
+      if (attempt < max_attempts)
+      {
+        eCAL::Logging::Log(eCAL::Logging::log_level_warning,
+          "TCP RELIABLE: отправка не удалась, повтор через " + std::to_string(retry_sleep_ms) + " ms (попытка "
+          + std::to_string(attempt) + "/" + std::to_string(max_attempts) + ")");
+        eCAL::Process::SleepMS(static_cast<long>(retry_sleep_ms));
+      }
+    }
 
     // return success
     return success;
